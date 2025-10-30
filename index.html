@@ -216,11 +216,13 @@
                             ...(format === 'jpeg' && { quality: quality })
                         });
 
+                        const finalBlob = Array.isArray(conversionResult) ? conversionResult[0] : conversionResult;
+
                         const originalName = file.name.substring(0, file.name.lastIndexOf('.'));
                         const newExtension = format === 'jpeg' ? 'jpg' : 'png';
 
                         convertedFiles.push({
-                            blob: conversionResult,
+                            blob: finalBlob,
                             name: `${originalName}.${newExtension}`,
                             originalName: file.name
                         });
@@ -255,16 +257,18 @@
             async function handleDownload() {
                 const successfulConversions = convertedFiles.filter(f => f !== null);
                 const timestamp = getTimestamp();
+                const format = formatSelect.value;
+                const newExtension = format === 'jpeg' ? 'jpg' : 'png';
 
                 try {
                     if (successfulConversions.length === 1) {
                         const file = successfulConversions[0];
-                        const newName = generateFileName(file.name, timestamp);
+                        const newName = generateFileName(file.originalName, newExtension, timestamp);
                         triggerDownload(file.blob, newName);
                     } else {
                         const zip = new JSZip();
-                        successfulConversions.forEach(file => {
-                            const newName = generateFileName(file.name, timestamp);
+                        successfulConversions.forEach((file, index) => {
+                            const newName = generateFileName(file.originalName, newExtension, timestamp, index);
                             zip.file(newName, file.blob);
                         });
 
@@ -291,10 +295,10 @@
                 return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
             }
 
-            function generateFileName(originalName, timestamp) {
+            function generateFileName(originalName, newExt, timestamp, index = null) {
                 const nameWithoutExt = originalName.substring(0, originalName.lastIndexOf('.'));
-                const newExt = originalName.substring(originalName.lastIndexOf('.'));
-                return `${nameWithoutExt}_${timestamp}${newExt}`;
+                const indexSuffix = index !== null ? `_(${index + 1})` : '';
+                return `${nameWithoutExt}_${timestamp}${indexSuffix}.${newExt}`;
             }
 
             function triggerDownload(blob, fileName) {
