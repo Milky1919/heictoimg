@@ -1,11 +1,313 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="ja">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
+    <title>HEIC Local Converter</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <style>
+        .dragover {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+        }
+    </style>
 </head>
-<body>
-    
+<body class="bg-gray-100 text-gray-800 font-sans">
+    <div class="container mx-auto p-4 md:p-8 max-w-4xl">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold text-gray-900">HEIC Local Converter</h1>
+            <p class="text-md text-gray-600 mt-2">Convert HEIC/HEIF images to JPEG or PNG right in your browser. No data is uploaded.</p>
+        </header>
+
+        <main>
+            <div id="drop-zone" class="border-4 border-dashed border-gray-300 rounded-lg p-8 text-center cursor-pointer transition-colors duration-300 hover:border-gray-400">
+                <p class="text-gray-500">Drag & Drop HEIC/HEIF files here, or click to select</p>
+                <input type="file" id="file-input" class="hidden" multiple accept=".heic,.heif,image/heic,image/heif">
+            </div>
+
+            <div id="control-panel" class="hidden mt-6 bg-white p-4 rounded-lg shadow-md">
+                <div class="flex flex-col md:flex-row items-center justify-between gap-4">
+                    <div class="flex items-center gap-4">
+                        <label for="format-select" class="font-semibold">Convert to:</label>
+                        <select id="format-select" class="rounded border-gray-300 shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50">
+                            <option value="jpeg" selected>JPEG</option>
+                            <option value="png">PNG</option>
+                        </select>
+                    </div>
+                    <button id="convert-btn" class="w-full md:w-auto bg-blue-500 hover:bg-blue-600 text-white font-bold py-2 px-6 rounded-lg transition-colors duration-300">
+                        Convert
+                    </button>
+                </div>
+            </div>
+
+            <div id="file-list-container" class="hidden mt-6">
+                <h2 class="text-xl font-semibold mb-2">Files to Convert</h2>
+                <div class="overflow-x-auto bg-white rounded-lg shadow">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">File Name</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Size</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">To Format</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="file-list-body" class="bg-white divide-y divide-gray-200">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+             <div id="error-message" class="hidden mt-4 bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
+                <strong class="font-bold">Error!</strong>
+                <span class="block sm:inline" id="error-text"></span>
+            </div>
+        </main>
+    </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const dropZone = document.getElementById('drop-zone');
+            const fileInput = document.getElementById('file-input');
+            const controlPanel = document.getElementById('control-panel');
+            const fileListContainer = document.getElementById('file-list-container');
+            const fileListBody = document.getElementById('file-list-body');
+            const formatSelect = document.getElementById('format-select');
+            const convertBtn = document.getElementById('convert-btn');
+            const errorMessage = document.getElementById('error-message');
+            const errorText = document.getElementById('error-text');
+
+            let filesToProcess = [];
+            let convertedFiles = [];
+            let originalConvertBtnOnClick;
+
+            function resetState() {
+                filesToProcess = [];
+                convertedFiles = [];
+                fileListBody.innerHTML = '';
+                controlPanel.classList.add('hidden');
+                fileListContainer.classList.add('hidden');
+                hideError();
+
+                convertBtn.textContent = 'Convert';
+                convertBtn.disabled = false;
+                if (originalConvertBtnOnClick) {
+                    convertBtn.onclick = originalConvertBtnOnClick;
+                }
+                formatSelect.disabled = false;
+                dropZone.style.pointerEvents = 'auto';
+            }
+
+            dropZone.addEventListener('click', () => fileInput.click());
+            fileInput.addEventListener('change', (e) => {
+                handleFiles(e.target.files);
+                fileInput.value = '';
+            });
+
+            dropZone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropZone.classList.add('dragover');
+            });
+
+            dropZone.addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropZone.classList.remove('dragover');
+            });
+
+            dropZone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dropZone.classList.remove('dragover');
+                handleFiles(e.dataTransfer.files);
+            });
+
+            function handleFiles(files) {
+                if (convertedFiles.length > 0) {
+                    resetState();
+                }
+
+                hideError();
+                let hasInvalidFiles = false;
+
+                for (const file of files) {
+                    const isHeic = file.type === 'image/heic' || file.type === 'image/heif' || file.name.toLowerCase().endsWith('.heic') || file.name.toLowerCase().endsWith('.heif');
+                    if (isHeic) {
+                        if (!filesToProcess.some(f => f.name === file.name && f.size === file.size)) {
+                            filesToProcess.push(file);
+                        }
+                    } else {
+                        hasInvalidFiles = true;
+                    }
+                }
+
+                if (hasInvalidFiles) {
+                    showError("Some files were not HEIC/HEIF and were ignored.");
+                }
+
+                if (filesToProcess.length > 0) {
+                    renderFileList();
+                    controlPanel.classList.remove('hidden');
+                    fileListContainer.classList.remove('hidden');
+                }
+            }
+
+            function renderFileList() {
+                fileListBody.innerHTML = '';
+                filesToProcess.forEach((file, index) => {
+                    const tr = document.createElement('tr');
+                    tr.setAttribute('data-file-index', index);
+
+                    const format = formatSelect.value.toUpperCase();
+                    const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
+
+                    tr.innerHTML = `
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">${file.name}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">${fileSizeMB} MB</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 format-cell">${format}</td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 status-cell">
+                            <span class="text-gray-500">Waiting</span>
+                        </td>
+                    `;
+                    fileListBody.appendChild(tr);
+                });
+            }
+
+            formatSelect.addEventListener('change', () => {
+                const newFormat = formatSelect.value.toUpperCase();
+                document.querySelectorAll('.format-cell').forEach(cell => {
+                    cell.textContent = newFormat;
+                });
+            });
+
+            function showError(message) {
+                errorText.textContent = message;
+                errorMessage.classList.remove('hidden');
+            }
+
+            function hideError() {
+                errorMessage.classList.add('hidden');
+            }
+
+            originalConvertBtnOnClick = async () => {
+                const format = formatSelect.value;
+                const toType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
+                const quality = 0.9;
+
+                convertBtn.disabled = true;
+                convertBtn.textContent = 'Processing...';
+                formatSelect.disabled = true;
+                dropZone.style.pointerEvents = 'none';
+
+                convertedFiles = [];
+
+                for (let i = 0; i < filesToProcess.length; i++) {
+                    const file = filesToProcess[i];
+                    const row = fileListBody.querySelector(`tr[data-file-index='${i}']`);
+                    const statusCell = row.querySelector('.status-cell');
+
+                    statusCell.innerHTML = `<div class="flex items-center"><svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg><span>Processing...</span></div>`;
+
+                    try {
+                        const conversionResult = await heic2any({
+                            blob: file,
+                            toType: toType,
+                            ...(format === 'jpeg' && { quality: quality })
+                        });
+
+                        const originalName = file.name.substring(0, file.name.lastIndexOf('.'));
+                        const newExtension = format === 'jpeg' ? 'jpg' : 'png';
+
+                        convertedFiles.push({
+                            blob: conversionResult,
+                            name: `${originalName}.${newExtension}`,
+                            originalName: file.name
+                        });
+
+                        statusCell.innerHTML = `<span class="text-green-600 font-semibold">✓ Completed</span>`;
+                    } catch (error) {
+                         console.error(`Failed to convert ${file.name}:`, error);
+                        statusCell.innerHTML = `<span class="text-red-600 font-semibold">✗ Error</span>`;
+                        convertedFiles.push(null);
+                    }
+                }
+
+                updateDownloadButton();
+            };
+
+            convertBtn.onclick = originalConvertBtnOnClick;
+
+            function updateDownloadButton() {
+                const successfulConversions = convertedFiles.filter(f => f !== null);
+
+                if (successfulConversions.length === 0) {
+                    convertBtn.textContent = 'No files to download';
+                    convertBtn.disabled = true;
+                    return;
+                }
+
+                convertBtn.textContent = `Download ${successfulConversions.length} file(s)`;
+                convertBtn.onclick = handleDownload;
+                convertBtn.disabled = false;
+            }
+
+            async function handleDownload() {
+                const successfulConversions = convertedFiles.filter(f => f !== null);
+                const timestamp = getTimestamp();
+
+                try {
+                    if (successfulConversions.length === 1) {
+                        const file = successfulConversions[0];
+                        const newName = generateFileName(file.name, timestamp);
+                        triggerDownload(file.blob, newName);
+                    } else {
+                        const zip = new JSZip();
+                        successfulConversions.forEach(file => {
+                            const newName = generateFileName(file.name, timestamp);
+                            zip.file(newName, file.blob);
+                        });
+
+                        convertBtn.textContent = 'Zipping...';
+                        convertBtn.disabled = true;
+
+                        const zipBlob = await zip.generateAsync({type:"blob"});
+                        const zipFileName = `HEIC_Converted_${timestamp}.zip`;
+                        triggerDownload(zipBlob, zipFileName);
+
+                        convertBtn.textContent = `Download ${successfulConversions.length} file(s)`;
+                        convertBtn.disabled = false;
+                    }
+                } catch (error) {
+                    console.error("Download failed:", error);
+                    showError("An error occurred while preparing the download.");
+                    updateDownloadButton();
+                }
+            }
+
+            function getTimestamp() {
+                const d = new Date();
+                const pad = (n) => n.toString().padStart(2, '0');
+                return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+            }
+
+            function generateFileName(originalName, timestamp) {
+                const nameWithoutExt = originalName.substring(0, originalName.lastIndexOf('.'));
+                const newExt = originalName.substring(originalName.lastIndexOf('.'));
+                return `${nameWithoutExt}_${timestamp}${newExt}`;
+            }
+
+            function triggerDownload(blob, fileName) {
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(() => URL.revokeObjectURL(url), 100);
+            }
+        });
+    </script>
 </body>
 </html>
