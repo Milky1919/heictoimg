@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HEIC Local Converter</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/heic-to@1.3.0/dist/iife/heic-to.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
     <style>
         .dragover {
@@ -190,53 +190,59 @@
                 errorMessage.classList.add('hidden');
             }
 
-            originalConvertBtnOnClick = async () => {
-                const format = formatSelect.value;
-                const toType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
-                const quality = 0.9;
+originalConvertBtnOnClick = async () => {
+    const format = formatSelect.value;
+    const toType = format === 'jpeg' ? 'image/jpeg' : 'image/png';
+    const quality = 0.9; // 仕様書の 90% 品質設定
 
-                convertBtn.disabled = true;
-                convertBtn.textContent = 'Processing...';
-                formatSelect.disabled = true;
-                dropZone.style.pointerEvents = 'none';
+    convertBtn.disabled = true;
+    convertBtn.textContent = 'Processing...';
+    formatSelect.disabled = true;
+    dropZone.style.pointerEvents = 'none';
 
-                convertedFiles = [];
+    convertedFiles = [];
 
-                for (let i = 0; i < filesToProcess.length; i++) {
-                    const file = filesToProcess[i];
-                    const row = fileListBody.querySelector(`tr[data-file-index='${i}']`);
-                    const statusCell = row.querySelector('.status-cell');
+    for (let i = 0; i < filesToProcess.length; i++) {
+        const file = filesToProcess[i];
+        const row = fileListBody.querySelector(`tr[data-file-index='${i}']`);
+        const statusCell = row.querySelector('.status-cell');
 
-                    statusCell.innerHTML = `<div class="flex items-center"><svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg><span>Processing...</span></div>`;
+        statusCell.innerHTML = `<div class="flex items-center"><svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-blue-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg><span>Processing...</span></div>`;
 
-                    try {
-                        const conversionResult = await HeicTo({
-                            blob: file,
-                            type: toType,
-                            ...(format === 'jpeg' && { quality: quality })
-                        });
+        try {
+            // ★★★ 修正箇所 ★★★
+            // heic2any を呼び出す
+            const conversionResult = await heic2any({
+                blob: file, // File オブジェクト(Blob)をそのまま渡す
+                toType: toType,
+                // JPEG の場合のみ quality を指定する
+                ...(format === 'jpeg' && { quality: quality })
+            });
+            // ★★★ 修正完了 ★★★
 
-                        const finalBlob = Array.isArray(conversionResult) ? conversionResult[0] : conversionResult;
+            const finalBlob = Array.isArray(conversionResult) ? conversionResult[0] : conversionResult;
 
-                        const originalName = file.name.substring(0, file.name.lastIndexOf('.'));
-                        const newExtension = format === 'jpeg' ? 'jpg' : 'png';
+            const originalName = file.name.substring(0, file.name.lastIndexOf('.'));
+            const newExtension = format === 'jpeg' ? 'jpg' : 'png';
 
-                        convertedFiles.push({
-                            blob: finalBlob,
-                            name: `${originalName}.${newExtension}`,
-                            originalName: file.name
-                        });
+            convertedFiles.push({
+                blob: finalBlob,
+                name: `${originalName}.${newExtension}`,
+                originalName: file.name
+            });
 
-                        statusCell.innerHTML = `<span class="text-green-600 font-semibold">✓ Completed</span>`;
-                    } catch (error) {
-                         console.error(`Failed to convert ${file.name}:`, error);
-                        statusCell.innerHTML = `<span class="text-red-600 font-semibold">✗ Error</span>`;
-                        convertedFiles.push(null);
-                    }
-                }
+            statusCell.innerHTML = `<span class="text-green-600 font-semibold">✓ Completed</span>`;
 
-                updateDownloadButton();
-            };
+        } catch (error) {
+            // エラー処理 (元のまま)
+            console.error(`Failed to convert ${file.name}:`, error);
+            statusCell.innerHTML = `<span class="text-red-600 font-semibold">✗ Error</span>`;
+            convertedFiles.push(null);
+        }
+    }
+
+    updateDownloadButton();
+};
 
             convertBtn.onclick = originalConvertBtnOnClick;
 
